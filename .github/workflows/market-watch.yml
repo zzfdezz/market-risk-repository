@@ -7,7 +7,47 @@ on:
       timezone: "Europe/Madrid"
 
 permissions:
+  contents: readname: Market risk monitor
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: '30 8 * * 2-6'
+      timezone: "Europe/Madrid"
+
+    - cron: '0 9 2 * *'
+      timezone: "Europe/Madrid"
+
+permissions:
   contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Run monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+        shell: bash
+
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            python market_watch.py --force
+          elif [ "${{ github.event.schedule }}" = "0 9 2 * *" ]; then
+            python market_watch.py --monthly
+          else
+            python market_watch.py
+          fi
 
 jobs:
   monitor:
