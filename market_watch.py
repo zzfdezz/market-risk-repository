@@ -18,7 +18,7 @@ ETFS=OrderedDict([
 ])
 
 def curl(url):
-    cmd=["curl","--fail","--silent","--show-error","--location","--retry","3","--retry-delay","2",
+    cmd=["curl","--http1.1","--fail","--silent","--show-error","--location","--retry","3","--retry-delay","2",
          "--connect-timeout","10","--max-time","30","-A","Mozilla/5.0 market-risk-monitor/3.0",url]
     try:
         return subprocess.run(cmd,capture_output=True,text=True,check=True,timeout=45).stdout
@@ -167,3 +167,4 @@ if __name__=="__main__":
     try: main()
     except Exception as e:
         print(f"ERROR: {e}",file=sys.stderr); raise
+
