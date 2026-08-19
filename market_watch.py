@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 from statistics import mean
 from zoneinfo import ZoneInfo
 
-FRED="https://fred.stlouisfed.org/graph/fredgraph.csv?id={}"
+FRED_API="https://api.stlouisfed.org/fred/series/observations"
 YAHOO="https://query1.finance.yahoo.com/v8/finance/chart/{}?range=2y&interval=1d&events=history&includeAdjustedClose=true"
 TZ="Europe/Madrid"
 OAS="BAMLH0A0HYM2"; SPX="SP500"
@@ -26,15 +26,58 @@ def curl(url):
         raise RuntimeError(f"Fallo descargando {url}: {e}") from e
 
 def fred(series):
-    r=csv.DictReader(io.StringIO(curl(FRED.format(urllib.parse.quote(series)))))
-    dk=r.fieldnames[0]; vk=series if series in r.fieldnames else r.fieldnames[1]
+    """
+    Official FRED API v1. Requires FRED_API_KEY.
+    The key is never printed in errors.
+    """
+    key=os.environ.get("FRED_API_KEY")
+    if not key:
+        raise RuntimeError("Falta FRED_API_KEY en las variables/secrets")
+
+    params=urllib.parse.urlencode({
+        "series_id": series,
+        "api_key": key,
+        "file_type": "json",
+        "sort_order": "asc",
+    })
+    url=FRED_API+"?"+params
+
+    cmd=[
+        "curl","--ipv4","--http1.1","--fail","--silent","--show-error",
+        "--location","--retry","3","--retry-delay","2",
+        "--connect-timeout","10","--max-time","30",
+        "-A","Mozilla/5.0 market-risk-monitor/3.2",url
+    ]
+    try:
+        p=subprocess.run(cmd,capture_output=True,text=True,check=True,timeout=45)
+    except Exception:
+        # Do not chain the exception: its repr may contain the API key.
+        raise RuntimeError(
+            f"No se pudo descargar {series} desde la API oficial de FRED"
+        ) from None
+
+    try:
+        payload=json.loads(p.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Respuesta FRED inválida para {series}") from None
+
+    if "error_code" in payload:
+        raise RuntimeError(
+            f"FRED devolvió error {payload.get('error_code')}: "
+            f"{payload.get('error_message','')}"
+        )
+
     out=[]
-    for row in r:
-        x=(row.get(vk) or "").strip()
-        if x in ("","."): continue
-        try: out.append((datetime.strptime(row[dk],"%Y-%m-%d").date(),float(x)))
-        except: pass
-    if not out: raise RuntimeError(f"Sin datos FRED para {series}")
+    for obs in payload.get("observations",[]):
+        x=(obs.get("value") or "").strip()
+        if x in ("","."):
+            continue
+        try:
+            out.append((datetime.strptime(obs["date"],"%Y-%m-%d").date(),float(x)))
+        except (ValueError,TypeError,KeyError):
+            pass
+    if not out:
+        raise RuntimeError(f"Sin datos FRED para {series}")
     return out
 
 def yahoo(ticker):
@@ -121,7 +164,7 @@ def main():
 
     now=datetime.now(ZoneInfo(TZ)); today=now.date()
     cr=credit(fred(OAS))
-    sp=fred(SPX); sc=provisional(sp,-1); sp_prev=provisional(sp,-2)
+    sp=yahoo("^GSPC"); sc=provisional(sp,-1); sp_prev=provisional(sp,-2)
     events=list(cr["events"])
     if sc["above"]!=sp_prev["above"]:
         events.append("S&P 500 cruza provisionalmente "+("ARRIBA" if sc["above"] else "ABAJO")+" de SMA10")
@@ -167,4 +210,3 @@ if __name__=="__main__":
     try: main()
     except Exception as e:
         print(f"ERROR: {e}",file=sys.stderr); raise
-
